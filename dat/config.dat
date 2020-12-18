@@ -1,0 +1,3 @@
+:threadcount=8
+:outputfile=dat/output.dat
+:lnklistfile=dat/links.dat
