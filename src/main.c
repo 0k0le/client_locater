@@ -122,19 +122,22 @@ char ***prepare_threads(pCONFIGDATA config_data, U32 total_links, char **lnk_lis
     for(U32 i = 0; i < config_data->thread_count - 1; i++) {
         lnk_lists[i] = (char **)ec_malloc(sizeof(char *) * divisor);
         for(U32 j = 0; j < divisor; j++) {
-           lnk_lists[i][j] = (char *)ec_malloc(sizeof(char) * ((strlen(lnk_list[(i * divisor) + j]) + strlen(LINKADDITION)) + 1));
+           lnk_lists[i][j] = (char *)ec_malloc(sizeof(char) * ((strlen(lnk_list[(i * divisor) + j])
+                + strlen(LINKADDITION)) + 1));
            strcpy(lnk_lists[i][j], lnk_list[(i * divisor) + j]);
            strcat(lnk_lists[i][j], LINKADDITION);
         }
     }
     
     {
-        U32 i = config_data->thread_count - 1;
+        register U32 i = config_data->thread_count - 1;
         
-        lnk_lists[i] = (char **)ec_malloc(sizeof(char *) * (divisor + (total_links % config_data->thread_count)));
+        lnk_lists[i] = (char **)ec_malloc(sizeof(char *) * (divisor + (total_links %
+            config_data->thread_count)));
 
         for(U32 j = 0; j < divisor + (total_links % config_data->thread_count); j++) {
-            lnk_lists[i][j] = (char *)ec_malloc(sizeof(char) * ((strlen(lnk_list[(i * divisor) + j]) + strlen(LINKADDITION)) + 1));
+            lnk_lists[i][j] = (char *)ec_malloc(sizeof(char) * ((strlen(lnk_list[(i * divisor) + j])
+                + strlen(LINKADDITION)) + 1));
             strcpy(lnk_lists[i][j], lnk_list[(i * divisor) + j]);
             strcat(lnk_lists[i][j], LINKADDITION);
         }
@@ -144,8 +147,8 @@ char ***prepare_threads(pCONFIGDATA config_data, U32 total_links, char **lnk_lis
     return lnk_lists;
 }
 
-void cleanup_threads(pCONFIGDATA config_data, U32 total_links, char ***lnk_lists) {
-    U32 divisor = total_links / config_data->thread_count;
+void cleanup_prethread_data(pCONFIGDATA config_data, U32 total_links, char ***lnk_lists) {
+    register U32 divisor = total_links / config_data->thread_count;
     
     for(U32 i = 0; i < config_data->thread_count - 1; i++) {
         for(U32 j = 0; j < divisor; j++)
@@ -164,7 +167,9 @@ void cleanup_threads(pCONFIGDATA config_data, U32 total_links, char ***lnk_lists
 
 int main(const int argc, char** argv, const char** const envp) {   
     UNUSED(envp);
-    
+   
+    puts("Initalizing...");
+
     // locals
     BOOL            config_file     = FALSE;
     CONFIGDATA      config_data     = { 0 };
@@ -226,6 +231,8 @@ int main(const int argc, char** argv, const char** const envp) {
     }
 #endif
 
+    puts("Spawning Threads...");
+
     // Spawn threads
     tids = (pthread_t *)ec_malloc(sizeof(pthread_t) * config_data.thread_count);
     thread_data = (pTHREADDATA)ec_malloc(sizeof(THREADDATA) * config_data.thread_count);
@@ -244,18 +251,41 @@ int main(const int argc, char** argv, const char** const envp) {
             ERRQ("Failed to spawn thread!");
     }
 
+    puts("Threads Spawned... This may take a couple minutes...");
+
     for(U32 i = 0; i < config_data.thread_count; i++) {
         pthread_join(tids[i], NULL);
     }
 
-    free(thread_data);
+    puts("Threads completed");
+
     free(tids);
 
-    fflush(stdout);
+    for(U32 i = 0; i < config_data.thread_count; i++) {
+        for(U32 j = 0; j < thread_data[i].total_processed_links; j++) {
+            if(thread_data[i].date_list[j]) {
+                printf("%s ", thread_data[i].date_list[j]);
+                free(thread_data[i].date_list[j]);
+            }
 
-    // Cleanup threads
-    cleanup_threads(&config_data, total_links, lnk_lists);
-    DEBUG("Threads cleaned up");
+            if(thread_data[i].final_link_list[j]) {
+                printf("%s", thread_data[i].final_link_list[j]);
+                free(thread_data[i].final_link_list[j]);
+            }
+
+            printf("\n");
+        }
+
+        free(thread_data[i].final_link_list);
+        free(thread_data[i].date_list);
+    }
+
+    free(thread_data);
+
+    cleanup_prethread_data(&config_data, total_links, lnk_lists);
+    DEBUG("Threads cleaned up...");
+
+    fflush(stdout);
 
     // Kill Crypto
     kill_locks();
