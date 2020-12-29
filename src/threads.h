@@ -9,7 +9,7 @@
 #include "macros.h"
 #include <pthread.h>
 #include <unistd.h>
-#include "../lib/curl/include/curl/curl.h"
+#include "curl/curl.h"
 #include "func.h"
 
 #define LINKADDITION "/d/computer-gigs/search/cpg"

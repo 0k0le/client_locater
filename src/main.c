@@ -15,7 +15,7 @@
 #include "config.h"
 
 // Curl
-#include "../lib/curl/include/curl/curl.h"
+#include "curl/curl.h"
 
 // STD libs
 #include <strings.h>
