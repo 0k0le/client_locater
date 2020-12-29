@@ -9,7 +9,7 @@
 #include "macros.h"
 #include <pthread.h>
 #include <unistd.h>
-#include <curl/curl.h>
+#include "../lib/curl/include/curl/curl.h"
 #include "func.h"
 
 #define LINKADDITION "/d/computer-gigs/search/cpg"
@@ -30,6 +30,7 @@ typedef struct thread_data {
 
 } THREADDATA, *pTHREADDATA;
 
+// Peel information from craigslist web scrape
 void rip_craigslist_data(char *html_page, pTHREADDATA thread_data) {
     register const char *ptr = html_page;
 
@@ -75,6 +76,7 @@ void rip_craigslist_data(char *html_page, pTHREADDATA thread_data) {
     }
 }
 
+// Curl write callback
 ssize_t curlwrite(void *ptr, size_t size, size_t nmemb, char **str) {
     register size_t old_len = strlen(*str);
     register size_t new_len = old_len + (size*nmemb);
@@ -90,6 +92,7 @@ ssize_t curlwrite(void *ptr, size_t size, size_t nmemb, char **str) {
     return size*nmemb;
 }
 
+// Curl thread main
 static void *thread_curl(void *data) {
     pTHREADDATA thread_data = (pTHREADDATA)data;
     CURLcode res;
@@ -117,8 +120,9 @@ static void *thread_curl(void *data) {
 
         DEBUG("CURLING %s", thread_data->link_list[i]);
 
-        if((res = curl_easy_perform(curl)) != CURLE_OK)
-            ERRQ("Failed to perform curl");    
+        if((res = curl_easy_perform(curl)) != CURLE_OK) {
+            ERRQ("Failed to perform curl: %s", curl_easy_strerror(res));
+        }
        
         rip_craigslist_data(str, thread_data);
 

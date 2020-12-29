@@ -15,7 +15,7 @@
 #include "config.h"
 
 // Curl
-#include <curl/curl.h>
+#include "../lib/curl/include/curl/curl.h"
 
 // STD libs
 #include <strings.h>
@@ -23,6 +23,7 @@
 // pthreads
 #include "threads.h"
 
+// Unload link list
 void unload_lnk_file(char **lnk_list, U32 line_count) {
     if(line_count == 0)
         ERRQ("Invalid line count number");
@@ -33,6 +34,7 @@ void unload_lnk_file(char **lnk_list, U32 line_count) {
     free(lnk_list);
 }
 
+// Load link file into link list
 U32 load_lnk_file(const char *const lnk_file, char ***lnk_list) {
     int fd = 0;
     char *lnk_file_buffer = NULL;
@@ -52,6 +54,7 @@ U32 load_lnk_file(const char *const lnk_file, char ***lnk_list) {
     return line_count;
 }
 
+// Load config file
 BOOL load_config_file(const char *const config_file_arg, pCONFIGDATA config_data) {
     char        *config_file_buffer = NULL;
     char        *temp_buffer        = NULL;
@@ -106,6 +109,7 @@ BOOL load_config_file(const char *const config_file_arg, pCONFIGDATA config_data
     return TRUE;
 }
 
+// Unload config file
 void unload_config_data(pCONFIGDATA config_data) {
     free(config_data->lnk_list_file);
     free(config_data->output_file);
@@ -147,6 +151,7 @@ char ***prepare_threads(pCONFIGDATA config_data, U32 total_links, char **lnk_lis
     return lnk_lists;
 }
 
+// Cleanup curl thread link list
 void cleanup_prethread_data(pCONFIGDATA config_data, U32 total_links, char ***lnk_lists) {
     register U32 divisor = total_links / config_data->thread_count;
     
@@ -212,6 +217,10 @@ int main(const int argc, char** argv, const char** const envp) {
     lnk_lists = prepare_threads(&config_data, total_links, lnk_list);
     DEBUG("Threads prepared"); 
 
+    // Cleanup link file
+    unload_lnk_file(lnk_list, total_links);
+    DEBUG("Link file unloaded");
+
 #ifdef _DEBUG
     register U32 divisor = total_links / config_data.thread_count;
 
@@ -261,19 +270,28 @@ int main(const int argc, char** argv, const char** const envp) {
 
     free(tids);
 
+    cleanup_prethread_data(&config_data, total_links, lnk_lists);
+    DEBUG("Threads cleaned up...");
+
     for(U32 i = 0; i < config_data.thread_count; i++) {
         for(U32 j = 0; j < thread_data[i].total_processed_links; j++) {
-            if(thread_data[i].date_list[j]) {
+            if(thread_data[i].date_list[j]) { 
+#ifdef _DEBUG
                 printf("%s ", thread_data[i].date_list[j]);
+#endif
                 free(thread_data[i].date_list[j]);
             }
 
             if(thread_data[i].final_link_list[j]) {
+#ifdef _DEBUG
                 printf("%s", thread_data[i].final_link_list[j]);
+#endif
                 free(thread_data[i].final_link_list[j]);
             }
 
+#ifdef _DEBUG
             printf("\n");
+#endif
         }
 
         free(thread_data[i].final_link_list);
@@ -281,9 +299,6 @@ int main(const int argc, char** argv, const char** const envp) {
     }
 
     free(thread_data);
-
-    cleanup_prethread_data(&config_data, total_links, lnk_lists);
-    DEBUG("Threads cleaned up...");
 
     fflush(stdout);
 
@@ -294,10 +309,6 @@ int main(const int argc, char** argv, const char** const envp) {
     // Cleanup config
     unload_config_data(&config_data);
     DEBUG("Config data unloaded");
-
-    // Cleanup link file
-    unload_lnk_file(lnk_list, total_links);
-    DEBUG("Link file unloaded");
 
     return EXIT_SUCCESS;
 }
