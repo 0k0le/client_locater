@@ -20,8 +20,117 @@
 // STD libs
 #include <strings.h>
 
-// pthreads
-#include "threads.h"
+#include <pthread.h>
+
+#include "thread_types.h"
+#include "analyze.h"
+
+// Peel information from craigslist web scrape
+void rip_craigslist_data(char *html_page, pTHREADDATA thread_data) {
+    register const char *ptr = html_page;
+
+    while((ptr = strstr(ptr, CLASSINDEX)) != NULL) {
+        if((ptr = strstr(ptr, DATEINDEX)) == NULL)
+            break;
+        
+        U32 buf_len_count = 0;
+
+        if(thread_data->date_list == NULL)
+            thread_data->date_list = (char **)ec_malloc(sizeof(char *));
+        else
+            thread_data->date_list = (char **)realloc(thread_data->date_list, (thread_data->total_processed_links + 1) * sizeof(char *));
+
+        ptr += strlen(DATEINDEX);
+
+        // Calculate date buffer length
+        for(; ptr[buf_len_count] != '\"'; buf_len_count++);
+
+        (thread_data->date_list)[thread_data->total_processed_links] = (char *)ec_malloc(sizeof(char) * (buf_len_count + 1));
+        memcpy((thread_data->date_list)[thread_data->total_processed_links], ptr, buf_len_count);
+
+        buf_len_count = 0;
+
+        if(thread_data->final_link_list == NULL)
+            thread_data->final_link_list = (char **)ec_malloc(sizeof(char *));
+        else
+            thread_data->final_link_list = (char **)realloc(thread_data->final_link_list, (thread_data->total_processed_links + 1) * sizeof(char *));
+
+        if((ptr = strstr(ptr, HREFINDEX)) == NULL) {
+            thread_data->total_processed_links++;
+            break;
+        }
+
+        ptr += strlen(HREFINDEX);
+
+        for(; ptr[buf_len_count] != '\"' && ptr[buf_len_count]; buf_len_count++);
+
+        (thread_data->final_link_list)[thread_data->total_processed_links] = (char *)ec_malloc(sizeof(char) * (buf_len_count + 1));
+        memcpy((thread_data->final_link_list)[thread_data->total_processed_links], ptr, buf_len_count);
+
+        thread_data->total_processed_links++;
+    }
+}
+
+// Curl write callback
+ssize_t curlwrite(void *ptr, size_t size, size_t nmemb, char **str) {
+    register size_t old_len = strlen(*str);
+    register size_t new_len = old_len + (size*nmemb);
+    
+    *str = (char *)realloc(*str, new_len + 1);
+    if(!(*str))
+        ERRQ("Realloc");
+
+    memcpy((*str) + old_len, ptr, size * nmemb);
+
+    (*str)[new_len] = 0;
+
+    return size*nmemb;
+}
+
+// Curl thread main
+static void *thread_curl(void *data) {
+    pTHREADDATA thread_data = (pTHREADDATA)data;
+    CURLcode res;
+    register U32 total_lnk = thread_data->total_links;
+
+    DEBUG("Thread Launched --> Total Scans: %d", thread_data->total_links);
+
+    CURL *curl = curl_easy_init();
+    if(curl == NULL)
+        ERRQ("curl_easy_init()");
+
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlwrite);
+
+    for(register U32 i = 0; i < total_lnk; i++) {
+        if(curl == NULL)
+            ERRQ("Failed to init curl!");
+ 
+        char *str = (char *)ec_malloc(1);
+
+        curl_easy_setopt(curl, CURLOPT_URL, thread_data->link_list[i]);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &str); 
+
+        DEBUG("CURLING %s", thread_data->link_list[i]);
+
+        if((res = curl_easy_perform(curl)) != CURLE_OK) {
+            ERRQ("Failed to perform curl: %s", curl_easy_strerror(res));
+        }
+       
+        rip_craigslist_data(str, thread_data);
+
+        free(str);
+    }
+
+    curl_easy_cleanup(curl);
+
+    // Call sort here
+    sort_dates_thread(thread_data); 
+
+    pthread_exit(NULL); 
+}
 
 // Unload link list
 void unload_lnk_file(char **lnk_list, U32 line_count) {
@@ -273,24 +382,53 @@ int main(const int argc, char** argv, const char** const envp) {
     cleanup_prethread_data(&config_data, total_links, lnk_lists);
     DEBUG("Threads cleaned up...");
 
+    THREADDATA final_sort_data = {0};
+    U32 total_processed_links = 0;
+    for(U32 i = 0; i < config_data.thread_count; i++) {
+        total_processed_links += thread_data[i].total_processed_links;
+    }     
+
+    final_sort_data.date_list = (char **)ec_malloc(sizeof(char *) * total_processed_links);
+    final_sort_data.final_link_list = (char **)ec_malloc(sizeof(char *) * total_processed_links); 
+    final_sort_data.total_processed_links = total_processed_links;
+
+    U32 position = 0;
+
+    for(U32 i = 0; i < config_data.thread_count; i++) {
+        for(U32 j = 0; j < thread_data[i].total_processed_links; j++) {
+            final_sort_data.date_list[j + position] = thread_data[i].date_list[j];
+            final_sort_data.final_link_list[j + position] = thread_data[i].final_link_list[j];
+        }
+
+        position += thread_data[i].total_processed_links;
+    }
+
+    sort_dates_thread(&final_sort_data);
+
+    for(U32 i = 0; i < total_processed_links; i++)
+        printf("%s %s\n", final_sort_data.date_list[i], final_sort_data.final_link_list[i]);
+
+    free(final_sort_data.date_list);
+    free(final_sort_data.final_link_list);
+
     for(U32 i = 0; i < config_data.thread_count; i++) {
         for(U32 j = 0; j < thread_data[i].total_processed_links; j++) {
             if(thread_data[i].date_list[j]) { 
 #ifdef _DEBUG
-                printf("%s ", thread_data[i].date_list[j]);
+                //printf("%s ", thread_data[i].date_list[j]);
 #endif
                 free(thread_data[i].date_list[j]);
-            }
+            } else ERRQ("NULL DATA SECTOR ERROR!");
 
             if(thread_data[i].final_link_list[j]) {
 #ifdef _DEBUG
-                printf("%s", thread_data[i].final_link_list[j]);
+                //printf("%s", thread_data[i].final_link_list[j]);
 #endif
                 free(thread_data[i].final_link_list[j]);
-            }
+            } else ERRQ("NULLL DATA SECTOR ERROR!");
 
 #ifdef _DEBUG
-            printf("\n");
+            //printf("\n");
 #endif
         }
 
